@@ -4,14 +4,14 @@ pip install discord.py flask requests
 python discord_bot.py
 """
 
-import json, os, threading, secrets, string, subprocess
+import json, os, threading, secrets, string
 from datetime import datetime
 from flask import Flask, request, jsonify
 import discord
 
-BOT_TOKEN  = "MTQ5NzY1MTE5MDAwNjE1NzU2Mw.GRzNF0.RlF__K1pYd0E_8c1V_0jK167tfTpCmqj0WcHeo"
-CHANNEL_ID = 1497653793209192569
-PORT       = 5000
+BOT_TOKEN  = os.environ.get("BOT_TOKEN", "")
+CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "1497653793209192569"))
+PORT       = int(os.environ.get("PORT", "5000"))
 DB         = "users.json"
 KEYS_DB    = "keys.json"
 ACCOUNTS   = "accounts.json"
@@ -349,39 +349,40 @@ async def on_message(message):
         await ch.send(embed=e)
 
 if __name__ == "__main__":
-    print(f"[*] Запуск Flask на порту {PORT}")
+    print(f"[*] Запуск на порту {PORT}")
 
     # Запускаем Flask
     threading.Thread(
         target=lambda: app_flask.run("0.0.0.0", PORT, debug=False, use_reloader=False),
         daemon=True).start()
 
-    # Автозапуск serveo туннеля
+    # Автозапуск localtunnel (npm install -g localtunnel)
     def start_tunnel():
         try:
-            print("[*] Запуск туннеля serveo.net...")
+            import subprocess, re
+            print("[*] Запуск туннеля localtunnel...")
             proc = subprocess.Popen(
-                ["ssh", "-o", "StrictHostKeyChecking=no",
-                 "-R", f"80:localhost:{PORT}", "serveo.net"],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True
+                ["lt", "--port", str(PORT)],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
             )
             for line in proc.stdout:
                 line = line.strip()
                 if line:
-                    print(f"[serveo] {line}")
-                    if "Forwarding HTTP traffic from" in line:
-                        url = line.split("from ")[-1].strip()
-                        print(f"\n{'='*50}")
+                    print(f"[tunnel] {line}")
+                    match = re.search(r"https://[^\s]+", line)
+                    if match:
+                        url = match.group(0)
+                        print(f"\n{'='*55}")
                         print(f"[!] ВСТАВЬ В HwidManager.java:")
                         print(f"    {url}/auth")
-                        print(f"{'='*50}\n")
+                        print(f"{'='*55}\n")
         except FileNotFoundError:
-            print("[!] SSH не найден. Установи OpenSSH или используй localhost для теста.")
+            print("[!] localtunnel не найден.")
+            print("[!] Установи: npm install -g localtunnel")
+            print(f"[!] Или вручную: lt --port {PORT}")
         except Exception as e:
-            print(f"[serveo] Ошибка: {e}")
+            print(f"[tunnel] Ошибка: {e}")
 
     threading.Thread(target=start_tunnel, daemon=True).start()
 
-    print(f"[*] Для теста локально: http://localhost:{PORT}/auth")
     client.run(BOT_TOKEN)
