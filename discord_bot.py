@@ -132,9 +132,13 @@ def auth():
             return jsonify({"error": True, "message": "Ник уже занят"})
         if key not in keys_db:
             return jsonify({"error": True, "message": "Неверный ключ продукта"})
-        if keys_db[key].get("used"):
-            return jsonify({"error": True, "message": "Ключ уже использован"})
-        keys_db[key]["used"]      = True
+        kd = keys_db[key]
+        max_uses = kd.get("max_uses", 1)
+        uses     = kd.get("uses", 0)
+        if uses >= max_uses:
+            return jsonify({"error": True, "message": "Ключ уже использован максимальное кол-во раз"})
+        keys_db[key]["uses"]      = uses + 1
+        keys_db[key]["used"]      = (uses + 1) >= max_uses
         keys_db[key]["used_by"]   = nick
         keys_db[key]["used_date"] = datetime.now().strftime("%d.%m.%Y")
         save(keys_db, KEYS_DB)
@@ -293,26 +297,42 @@ async def on_message(message):
         except ValueError:
             await ch.send("Использование: !del uid 1")
 
-    # !key дата
+    # !key дата [кол-во активаций]  пример: !key 25.05.2026 3
     elif text.startswith("!key"):
-        parts   = text.split()
-        expires = parts[1] if len(parts) > 1 else "∞"
+        parts = text.split()
+        if len(parts) < 2:
+            await ch.send("Использование: `!key 25.05.2026` или `!key 25.05.2026 3`"); return
+
+        expires = parts[1]
         if expires != "∞":
             try: datetime.strptime(expires, "%d.%m.%Y")
-            except: await ch.send("❌ Формат: !key 25.05.2026"); return
-        chars = string.ascii_uppercase + string.digits
-        key   = "-".join("".join(secrets.choice(chars) for _ in range(4)) for _ in range(4))
+            except: await ch.send("❌ Формат даты: `!key 25.05.2026`"); return
+
+        max_uses = 1
+        if len(parts) >= 3:
+            try:
+                max_uses = int(parts[2])
+                if max_uses < 1: raise ValueError
+            except ValueError:
+                await ch.send("❌ Кол-во активаций — целое число >= 1"); return
+
+        chars   = string.ascii_uppercase + string.digits
+        key     = "-".join("".join(secrets.choice(chars) for _ in range(4)) for _ in range(4))
         keys_db = load(KEYS_DB)
         keys_db[key] = {
-            "expires": expires,
-            "created": datetime.now().strftime("%d.%m.%Y %H:%M"),
-            "used":    False, "used_by": None,
+            "expires":  expires,
+            "created":  datetime.now().strftime("%d.%m.%Y %H:%M"),
+            "used":     False,
+            "used_by":  None,
+            "max_uses": max_uses,
+            "uses":     0,
         }
         save(keys_db, KEYS_DB)
         e = discord.Embed(title="🔑 Новый ключ создан", color=0x3ba55d)
-        e.add_field(name="Ключ",   value=f"```{key}```", inline=False)
-        e.add_field(name="До",     value=f"`{expires}`", inline=True)
-        e.add_field(name="Создан", value=f"`{datetime.now().strftime('%d.%m.%Y %H:%M')}`", inline=True)
+        e.add_field(name="Ключ",      value=f"```{key}```",  inline=False)
+        e.add_field(name="До",        value=f"`{expires}`",  inline=True)
+        e.add_field(name="Активаций", value=f"`{max_uses}`", inline=True)
+        e.add_field(name="Создан",    value=f"`{datetime.now().strftime('%d.%m.%Y %H:%M')}`", inline=True)
         await ch.send(embed=e)
 
     # !keys
@@ -321,9 +341,11 @@ async def on_message(message):
         if not keys_db: await ch.send("Нет ключей"); return
         lines = []
         for k, v in list(keys_db.items())[:20]:
-            st = "✅ Использован" if v["used"] else "🔑 Свободен"
-            by = f" → `{v['used_by']}`" if v["used"] else ""
-            lines.append(f"{st} `{k}` до `{v['expires']}`{by}")
+            uses     = v.get("uses", 1 if v.get("used") else 0)
+            max_uses = v.get("max_uses", 1)
+            st = "✅" if uses >= max_uses else "🔑"
+            by = f" → `{v['used_by']}`" if v.get("used_by") else ""
+            lines.append(f"{st} `{k}` до `{v['expires']}` [{uses}/{max_uses}]{by}")
         e = discord.Embed(title=f"🔑 Ключи ({len(keys_db)})",
                           description="\n".join(lines), color=0x5865f2)
         await ch.send(embed=e)
