@@ -9,7 +9,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 import discord
 
-BOT_TOKEN  = "MTQ5NzY1MTE5MDAwNjE1NzU2Mw.G5AeQt.-xUzd9XDWCYOvZ4yYivFtJitn0sajzX_CIGjTM"
+BOT_TOKEN  = "MTQ5NzY1MTE5MDAwNjE1NzU2Mw.GRzNF0.RlF__K1pYd0E_8c1V_0jK167tfTpCmqj0WcHeo"
 CHANNEL_ID = 1497653793209192569
 PORT       = 5000
 DB         = "users.json"
