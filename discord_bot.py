@@ -184,6 +184,19 @@ def auth():
             "launches": 1, "first": now, "last": now,
         }
     else:
+        # Проверяем сброс HWID — если флаг стоит, обновляем HWID
+        if user.get("hwid_reset") and user.get("hwid_reset_uses", 0) > 0:
+            old_hwid = user["hwid"]
+            if old_hwid != hwid:
+                # Переносим запись на новый HWID
+                user["hwid"]             = hwid
+                user["hwid_reset_uses"] -= 1
+                if user["hwid_reset_uses"] <= 0:
+                    user["hwid_reset"] = False
+                # Удаляем старый ключ, добавляем новый
+                del db[old_hwid]
+                db[hwid] = user
+
         user.update({
             "name":     d.get("client_name", user["name"]),
             "mc":       d.get("username",    user["mc"]),
@@ -239,7 +252,7 @@ async def on_message(message):
         e.add_field(name="❄️ Frozen",  value=str(f),       inline=True)
         e.add_field(name="🚫 Banned",  value=str(b),       inline=True)
         e.add_field(name="❓ Unknown", value=str(n),       inline=True)
-        e.set_footer(text="!users | !find имя | !uid N | !del uid N | !key дата | !keys | !reg ник")
+        e.set_footer(text="!users | !find имя | !uid N | !del uid N | !key дата [N] | !keys | !reg ник | !hwid UID снять/сбросить [N]")
         await ch.send(embed=e)
 
     # !users
@@ -335,8 +348,72 @@ async def on_message(message):
         e.add_field(name="Создан",    value=f"`{datetime.now().strftime('%d.%m.%Y %H:%M')}`", inline=True)
         await ch.send(embed=e)
 
-    # !keys
-    elif text == "!keys":
+    # !hwid UID снять|сбросить [кол-во]
+    # !hwid 1 снять       — снять привязку HWID (1 раз)
+    # !hwid 1 сбросить 3  — дать 3 сброса HWID
+    elif text.startswith("!hwid "):
+        parts = text.split()
+        if len(parts) < 3:
+            await ch.send(
+                "Использование:\n"
+                "`!hwid 1 снять` — снять привязку HWID (1 раз)\n"
+                "`!hwid 1 сбросить 3` — дать 3 сброса HWID"
+            ); return
+
+        try:
+            uid = int(parts[1])
+        except ValueError:
+            await ch.send("❌ UID должен быть числом"); return
+
+        action = parts[2].lower()
+        db = load()
+
+        # Найти пользователя по UID
+        hwid_found = None
+        for hwid, u in db.items():
+            if u.get("uid") == uid:
+                hwid_found = hwid
+                break
+
+        if hwid_found is None:
+            await ch.send(f"❌ UID {uid} не найден"); return
+
+        u = db[hwid_found]
+
+        if action == "снять":
+            # Снимаем привязку — при следующем запуске примет любой HWID
+            u["hwid_reset"]      = True
+            u["hwid_reset_uses"] = 1
+            db[hwid_found] = u
+            save(db)
+            e = discord.Embed(title="🔓 HWID снят", color=0x3ba55d)
+            e.add_field(name="UID",  value=f"`{uid}`",              inline=True)
+            e.add_field(name="Имя",  value=f"`{u.get('name','?')}`",inline=True)
+            e.add_field(name="Инфо", value="Пользователь может зайти с любого железа **1 раз**", inline=False)
+            await ch.send(embed=e)
+
+        elif action == "сбросить":
+            count = 1
+            if len(parts) >= 4:
+                try:
+                    count = int(parts[3])
+                    if count < 1: raise ValueError
+                except ValueError:
+                    await ch.send("❌ Кол-во сбросов должно быть числом >= 1"); return
+
+            u["hwid_reset"]      = True
+            u["hwid_reset_uses"] = count
+            db[hwid_found] = u
+            save(db)
+            e = discord.Embed(title="🔄 HWID сброшен", color=0x5865f2)
+            e.add_field(name="UID",       value=f"`{uid}`",              inline=True)
+            e.add_field(name="Имя",       value=f"`{u.get('name','?')}`",inline=True)
+            e.add_field(name="Сбросов",   value=f"`{count}`",            inline=True)
+            e.add_field(name="Инфо", value=f"Пользователь может сменить железо **{count}** раз(а)", inline=False)
+            await ch.send(embed=e)
+
+        else:
+            await ch.send("❌ Действие: `снять` или `сбросить`")
         keys_db = load(KEYS_DB)
         if not keys_db: await ch.send("Нет ключей"); return
         lines = []
@@ -408,3 +485,4 @@ if __name__ == "__main__":
     threading.Thread(target=start_tunnel, daemon=True).start()
 
     client.run(BOT_TOKEN)
+
