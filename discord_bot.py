@@ -345,7 +345,7 @@ async def on_message(message):
         e.add_field(name="👥 Аккаунтов", value=str(len(accounts)), inline=True)
         e.description = (
             "**Команды лоудера:**\n"
-            "`!reg loader 25.05.2026` — создать аккаунт\n"
+            "`!reg loader 25.05.2026 nickname` — создать аккаунт\n"
             "`!loader users` — список пользователей\n"
             "`!uid loader 1 ban` — забанить\n"
             "`!uid loader 1 unban` — разбанить\n\n"
@@ -442,19 +442,24 @@ async def on_message(message):
                           description="\n".join(lines), color=0x5865f2)
         await ch.send(embed=e)
 
-    # !reg loader срок
+    # !reg loader дата ник
     elif text.startswith("!reg loader "):
         parts = text.split()
-        if len(parts) < 3:
-            await ch.send("Использование: `!reg loader 25.05.2026`"); return
+        if len(parts) < 4:
+            await ch.send("Использование: `!reg loader 25.05.2026 nickname`"); return
         
         expires = parts[2]
+        login   = parts[3].lower()
+        
         if expires != "∞":
             try: datetime.strptime(expires, "%d.%m.%Y")
-            except: await ch.send("❌ Формат даты: `!reg loader 25.05.2026`"); return
+            except: await ch.send("❌ Формат даты: `!reg loader 25.05.2026 nickname`"); return
         
         accounts = load(ACCOUNTS)
-        login    = "user" + str(len(accounts) + 1)
+        
+        if login in accounts:
+            await ch.send(f"❌ Логин `{login}` уже занят"); return
+        
         tmp_pass = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
         uid      = len(accounts) + 1
         
