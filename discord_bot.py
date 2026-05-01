@@ -115,6 +115,10 @@ def send_notification(user, title="🚀 Запуск WindowReborm"):
 
 app_flask = Flask(__name__)
 
+@app_flask.route("/", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "service": "WindowReborm Auth Server"}), 200
+
 @app_flask.route("/auth", methods=["POST"])
 def auth():
     d      = request.get_json(force=True) or {}
@@ -585,4 +589,3 @@ if __name__ == "__main__":
         import time
         while True:
             time.sleep(60)
-
