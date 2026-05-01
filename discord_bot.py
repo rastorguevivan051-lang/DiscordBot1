@@ -532,11 +532,13 @@ async def on_message(message):
             await ch.send(f"❌ UID {uid} не найден")
 
 if __name__ == "__main__":
-    print(f"[*] Запуск на порту {PORT}")
+    # Railway предоставляет PORT через переменную окружения
+    port = int(os.environ.get("PORT", PORT))
+    print(f"[*] Запуск на порту {port}")
 
     # Запускаем Flask
     threading.Thread(
-        target=lambda: app_flask.run("0.0.0.0", PORT, debug=False, use_reloader=False),
+        target=lambda: app_flask.run("0.0.0.0", port, debug=False, use_reloader=False),
         daemon=True).start()
 
     # Автозапуск localtunnel (npm install -g localtunnel)
@@ -545,7 +547,7 @@ if __name__ == "__main__":
             import subprocess, re
             print("[*] Запуск туннеля localtunnel...")
             proc = subprocess.Popen(
-                ["lt", "--port", str(PORT)],
+                ["lt", "--port", str(port)],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
             )
             for line in proc.stdout:
@@ -562,11 +564,12 @@ if __name__ == "__main__":
         except FileNotFoundError:
             print("[!] localtunnel не найден.")
             print("[!] Установи: npm install -g localtunnel")
-            print(f"[!] Или вручную: lt --port {PORT}")
+            print(f"[!] Или вручную: lt --port {port}")
         except Exception as e:
             print(f"[tunnel] Ошибка: {e}")
 
-    threading.Thread(target=start_tunnel, daemon=True).start()
+    # Не запускаем tunnel на Railway
+    if not os.environ.get("RAILWAY_ENVIRONMENT"):
+        threading.Thread(target=start_tunnel, daemon=True).start()
 
     client.run(BOT_TOKEN)
-
