@@ -541,35 +541,48 @@ if __name__ == "__main__":
         target=lambda: app_flask.run("0.0.0.0", port, debug=False, use_reloader=False),
         daemon=True).start()
 
-    # Автозапуск localtunnel (npm install -g localtunnel)
-    def start_tunnel():
-        try:
-            import subprocess, re
-            print("[*] Запуск туннеля localtunnel...")
-            proc = subprocess.Popen(
-                ["lt", "--port", str(port)],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-            )
-            for line in proc.stdout:
-                line = line.strip()
-                if line:
-                    print(f"[tunnel] {line}")
-                    match = re.search(r"https://[^\s]+", line)
-                    if match:
-                        url = match.group(0)
-                        print(f"\n{'='*55}")
-                        print(f"[!] ВСТАВЬ В HwidManager.java:")
-                        print(f"    {url}/auth")
-                        print(f"{'='*55}\n")
-        except FileNotFoundError:
-            print("[!] localtunnel не найден.")
-            print("[!] Установи: npm install -g localtunnel")
-            print(f"[!] Или вручную: lt --port {port}")
-        except Exception as e:
-            print(f"[tunnel] Ошибка: {e}")
-
     # Не запускаем tunnel на Railway
     if not os.environ.get("RAILWAY_ENVIRONMENT"):
+        def start_tunnel():
+            try:
+                import subprocess, re
+                print("[*] Запуск туннеля localtunnel...")
+                proc = subprocess.Popen(
+                    ["lt", "--port", str(port)],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                )
+                for line in proc.stdout:
+                    line = line.strip()
+                    if line:
+                        print(f"[tunnel] {line}")
+                        match = re.search(r"https://[^\s]+", line)
+                        if match:
+                            url = match.group(0)
+                            print(f"\n{'='*55}")
+                            print(f"[!] ВСТАВЬ В HwidManager.java:")
+                            print(f"    {url}/auth")
+                            print(f"{'='*55}\n")
+            except FileNotFoundError:
+                print("[!] localtunnel не найден.")
+            except Exception as e:
+                print(f"[tunnel] Ошибка: {e}")
         threading.Thread(target=start_tunnel, daemon=True).start()
 
-    client.run(BOT_TOKEN)
+    # Запускаем Discord бота только если токен есть
+    if BOT_TOKEN and BOT_TOKEN != "":
+        try:
+            client.run(BOT_TOKEN)
+        except Exception as e:
+            print(f"[!] Discord бот не запустился: {e}")
+            print(f"[*] Flask сервер продолжает работать...")
+            # Держим программу запущенной
+            import time
+            while True:
+                time.sleep(60)
+    else:
+        print("[!] BOT_TOKEN не установлен, Discord бот не запущен")
+        print("[*] Flask сервер работает...")
+        import time
+        while True:
+            time.sleep(60)
+
