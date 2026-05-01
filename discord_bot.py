@@ -1,5 +1,5 @@
 """
-WindowClient Discord Admin Bot
+WindowReborm Discord Admin Bot
 pip install discord.py flask requests
 python discord_bot.py
 """
@@ -38,14 +38,13 @@ loop   = None
 SE = {"active":"✅ Активна","frozen":"❄️ Заморожена",
       "banned":"🚫 Заблокирована","unknown":"❓ Новый"}
 
-def make_embed(u, title="🚀 Запуск клиента"):
+def make_embed(u, title="🚀 Запуск WindowReborm"):
     color = {"active":0x3ba55d,"frozen":0x5865f2,
              "banned":0xed4245,"unknown":0x99aab5}.get(u.get("status","unknown"), 0x99aab5)
     e = discord.Embed(title=title, color=color, timestamp=datetime.now())
     e.add_field(name="🆔 UID",     value=f"`{u.get('uid','?')}`",     inline=True)
     e.add_field(name="📋 Статус",  value=SE.get(u.get("status","unknown"),"❓"), inline=True)
-    e.add_field(name="👤 Имя",     value=f"`{u.get('name','?')}`",    inline=True)
-    e.add_field(name="👾 Ник MC",  value=f"`{u.get('mc','?')}`",      inline=True)
+    e.add_field(name="👤 Логин",   value=f"`{u.get('login','?')}`",   inline=True)
     e.add_field(name="🖥 ПК",      value=f"`{u.get('pc','?')}`",      inline=True)
     e.add_field(name="👤 ОС",      value=f"`{u.get('os_user','?')}`", inline=True)
     e.add_field(name="📦 Версия",  value=f"`{u.get('version','?')}`", inline=True)
@@ -104,7 +103,7 @@ class UserView(discord.ui.View):
         else:
             await i.response.send_message("Не найден", ephemeral=True)
 
-def send_notification(user, title="🚀 Запуск клиента"):
+def send_notification(user, title="🚀 Запуск WindowReborm"):
     import asyncio
     async def _send():
         ch = client.get_channel(CHANNEL_ID)
@@ -124,42 +123,47 @@ def auth():
     # Вход
     if action == "login":
         accounts = load(ACCOUNTS)
-        nick = d.get("nick","").lower()
-        pw   = d.get("pass","")
-        if nick not in accounts:
-            return jsonify({"error": True, "message": "Аккаунт не найден"})
-        if accounts[nick]["password"] != pw:
-            return jsonify({"error": True, "message": "Неверный пароль"})
-        if accounts[nick].get("banned"):
-            return jsonify({"error": True, "message": "Аккаунт заблокирован"})
-        return jsonify({"ok": True})
+        login = d.get("login","").lower()
+        pw    = d.get("password","")
+        if login not in accounts:
+            return jsonify({"status": "wrong"})
+        if accounts[login]["password"] != pw:
+            return jsonify({"status": "wrong"})
+        if accounts[login].get("banned"):
+            return jsonify({"status": "banned"})
+        return jsonify({
+            "status": "ok",
+            "uid": accounts[login].get("uid", 0),
+            "group": accounts[login].get("group", "Пользователь"),
+            "subscription_end": accounts[login].get("expires", "Не куплен")
+        })
 
     # Регистрация
     if action == "register":
         accounts = load(ACCOUNTS)
         keys_db  = load(KEYS_DB)
-        nick = d.get("nick","").lower()
-        pw   = d.get("pass","")
-        key  = d.get("key","").upper()
-        if nick in accounts:
-            return jsonify({"error": True, "message": "Ник уже занят"})
+        login = d.get("login","").lower()
+        pw    = d.get("password","")
+        key   = d.get("key","").upper()
+        if login in accounts:
+            return jsonify({"status": "user_exists"})
         if key not in keys_db:
-            return jsonify({"error": True, "message": "Неверный ключ продукта"})
+            return jsonify({"status": "key_invalid"})
         kd = keys_db[key]
-        max_uses = kd.get("max_uses", 1)
-        uses     = kd.get("uses", 0)
-        if uses >= max_uses:
-            return jsonify({"error": True, "message": "Ключ уже использован максимальное кол-во раз"})
-        keys_db[key]["uses"]      = uses + 1
-        keys_db[key]["used"]      = (uses + 1) >= max_uses
-        keys_db[key]["used_by"]   = nick
+        if kd.get("used"):
+            return jsonify({"status": "key_invalid"})
+        keys_db[key]["used"]      = True
+        keys_db[key]["used_by"]   = login
         keys_db[key]["used_date"] = datetime.now().strftime("%d.%m.%Y")
         save(keys_db, KEYS_DB)
-        accounts[nick] = {
+        uid = len(accounts) + 1
+        accounts[login] = {
+            "uid": uid,
             "password": pw, "key": key,
             "expires":  keys_db[key].get("expires",""),
             "created":  datetime.now().strftime("%d.%m.%Y %H:%M"),
             "banned":   False,
+            "group":    "Пользователь"
         }
         save(accounts, ACCOUNTS)
         import asyncio
@@ -167,13 +171,13 @@ def auth():
             ch = client.get_channel(CHANNEL_ID)
             if ch:
                 e = discord.Embed(title="🆕 Новая регистрация", color=0x3ba55d, timestamp=datetime.now())
-                e.add_field(name="👤 Ник",  value=f"`{nick}`")
-                e.add_field(name="🔑 Ключ", value=f"`{key}`")
-                e.add_field(name="📅 До",   value=f"`{keys_db[key].get('expires','∞')}`")
+                e.add_field(name="👤 Логин", value=f"`{login}`")
+                e.add_field(name="🔑 Ключ",  value=f"`{key}`")
+                e.add_field(name="📅 До",    value=f"`{keys_db[key].get('expires','∞')}`")
                 await ch.send(embed=e)
         if loop and loop.is_running():
             asyncio.run_coroutine_threadsafe(_notify(), loop)
-        return jsonify({"ok": True})
+        return jsonify({"status": "ok"})
 
     # Запуск клиента
     hwid  = d.get("hwid","")
@@ -212,8 +216,7 @@ def auth():
         uid  = len(db) + 1
         user = {
             "uid": uid, "hwid": hwid,
-            "name":     d.get("client_name","?"),
-            "mc":       d.get("username","?"),
+            "login":    d.get("client_name","?"),
             "version":  d.get("version","?"),
             "hardware": d.get("hardware","?"),
             "pc":       d.get("pc_name","?"),
@@ -236,8 +239,7 @@ def auth():
                 db[hwid] = user
 
         user.update({
-            "name":     d.get("client_name", user["name"]),
-            "mc":       d.get("username",    user["mc"]),
+            "login":    d.get("client_name", user.get("login","?")),
             "hardware": d.get("hardware",    user["hardware"]),
             "pc":       d.get("pc_name",     user["pc"]),
             "os_user":  d.get("os_user",     user["os_user"]),
@@ -338,93 +340,79 @@ async def on_message(message):
 
     # !menu
     if text in ("!menu", "!start"):
-        db = load()
-        a = sum(1 for u in db.values() if u["status"]=="active")
-        f = sum(1 for u in db.values() if u["status"]=="frozen")
-        b = sum(1 for u in db.values() if u["status"]=="banned")
-        n = sum(1 for u in db.values() if u["status"]=="unknown")
-        e = discord.Embed(title="👋 WindowClient Admin Panel", color=0x5865f2)
-        e.add_field(name="👥 Всего",    value=str(len(db)), inline=True)
-        e.add_field(name="✅ Active",   value=str(a),       inline=True)
-        e.add_field(name="❄️ Frozen",  value=str(f),       inline=True)
-        e.add_field(name="🚫 Banned",  value=str(b),       inline=True)
-        e.add_field(name="❓ Unknown", value=str(n),       inline=True)
-        e.set_footer(text="!users | !find имя | !uid N | !del uid N | !key дата [N] | !keys | !reg ник | !hwid UID снять/сбросить [N]")
+        accounts = load(ACCOUNTS)
+        e = discord.Embed(title="👋 WindowReborm Admin Panel", color=0x5865f2)
+        e.add_field(name="👥 Аккаунтов", value=str(len(accounts)), inline=True)
+        e.description = (
+            "**Команды лоудера:**\n"
+            "`!reg loader 25.05.2026` — создать аккаунт\n"
+            "`!loader users` — список пользователей\n"
+            "`!uid loader 1 ban` — забанить\n"
+            "`!uid loader 1 unban` — разбанить\n\n"
+            "**Команды ключей:**\n"
+            "`!key 25.05.2026` — создать ключ\n"
+            "`!keys` — список ключей\n\n"
+            "**Поиск:**\n"
+            "`!find логин` — найти пользователя"
+        )
         await ch.send(embed=e)
 
     # !users
     elif text == "!users":
-        db = load(); users = list(db.values())
-        if not users: await ch.send("Нет пользователей"); return
+        accounts = load(ACCOUNTS)
+        if not accounts: await ch.send("Нет пользователей"); return
         lines = []
-        for u in users[:20]:
-            em = {"active":"✅","frozen":"❄️","banned":"🚫","unknown":"❓"}.get(u["status"],"❓")
-            lines.append(f"{em} **UID {u['uid']}** — `{u['name']}` | `{u['mc']}`")
-        e = discord.Embed(title=f"👥 Пользователи ({len(users)})",
+        for login, acc in list(accounts.items())[:20]:
+            em = "🚫" if acc.get("banned") else "✅"
+            lines.append(f"{em} **UID {acc.get('uid',0)}** — `{login}`")
+        e = discord.Embed(title=f"👥 Пользователи ({len(accounts)})",
                           description="\n".join(lines), color=0x5865f2)
         await ch.send(embed=e)
 
-    # !find имя
+    # !find логин
     elif text.startswith("!find "):
         q = text[6:].strip().lower()
-        for hwid, u in load().items():
-            if u["name"].lower()==q or u["mc"].lower()==q:
-                await ch.send(embed=make_embed(u), view=UserView(hwid)); return
-        await ch.send(f"❌ `{q}` не найден")
+        accounts = load(ACCOUNTS)
+        if q in accounts:
+            acc = accounts[q]
+            e = discord.Embed(title=f"👤 {q}", color=0x3ba55d)
+            e.add_field(name="UID", value=f"`{acc.get('uid',0)}`", inline=True)
+            e.add_field(name="Группа", value=f"`{acc.get('group','Пользователь')}`", inline=True)
+            e.add_field(name="До", value=f"`{acc.get('expires','∞')}`", inline=True)
+            e.add_field(name="Создан", value=f"`{acc.get('created','?')}`", inline=True)
+            e.add_field(name="Забанен", value="Да" if acc.get("banned") else "Нет", inline=True)
+            await ch.send(embed=e)
+        else:
+            await ch.send(f"❌ `{q}` не найден")
 
     # !uid N
     elif text.startswith("!uid "):
         try:
             uid = int(text[5:].strip())
-            for hwid, u in load().items():
-                if u.get("uid") == uid:
-                    await ch.send(embed=make_embed(u), view=UserView(hwid)); return
+            accounts = load(ACCOUNTS)
+            for login, acc in accounts.items():
+                if acc.get("uid") == uid:
+                    e = discord.Embed(title=f"👤 {login}", color=0x3ba55d)
+                    e.add_field(name="UID", value=f"`{uid}`", inline=True)
+                    e.add_field(name="Группа", value=f"`{acc.get('group','Пользователь')}`", inline=True)
+                    e.add_field(name="До", value=f"`{acc.get('expires','∞')}`", inline=True)
+                    await ch.send(embed=e); return
             await ch.send(f"❌ UID {uid} не найден")
         except ValueError:
             await ch.send("Использование: !uid 1")
 
-    # !del uid N
-    elif text.startswith("!del uid "):
-        try:
-            uid = int(text[9:].strip())
-            db  = load()
-            hwid_to_del = None
-            user_to_del = None
-            for hwid, u in db.items():
-                if u.get("uid") == uid:
-                    hwid_to_del = hwid
-                    user_to_del = u
-                    break
-            if hwid_to_del is None:
-                await ch.send(f"❌ UID {uid} не найден"); return
-            del db[hwid_to_del]
-            save(db)
-            e = discord.Embed(title="🗑️ Аккаунт удалён", color=0xed4245)
-            e.add_field(name="UID",  value=f"`{uid}`",                         inline=True)
-            e.add_field(name="Имя",  value=f"`{user_to_del.get('name','?')}`", inline=True)
-            e.add_field(name="HWID", value=f"`{hwid_to_del}`",                 inline=False)
-            await ch.send(embed=e)
-        except ValueError:
-            await ch.send("Использование: !del uid 1")
 
-    # !key дата [кол-во активаций]  пример: !key 25.05.2026 3
+
+    # !key дата
     elif text.startswith("!key"):
         parts = text.split()
         if len(parts) < 2:
-            await ch.send("Использование: `!key 25.05.2026` или `!key 25.05.2026 3`"); return
+            await ch.send("Использование: `!key 25.05.2026`"); return
 
         expires = parts[1]
         if expires != "∞":
             try: datetime.strptime(expires, "%d.%m.%Y")
             except: await ch.send("❌ Формат даты: `!key 25.05.2026`"); return
-
-        max_uses = 1
-        if len(parts) >= 3:
-            try:
-                max_uses = int(parts[2])
-                if max_uses < 1: raise ValueError
-            except ValueError:
-                await ch.send("❌ Кол-во активаций — целое число >= 1"); return
 
         chars   = string.ascii_uppercase + string.digits
         key     = "-".join("".join(secrets.choice(chars) for _ in range(4)) for _ in range(4))
@@ -434,111 +422,109 @@ async def on_message(message):
             "created":  datetime.now().strftime("%d.%m.%Y %H:%M"),
             "used":     False,
             "used_by":  None,
-            "max_uses": max_uses,
-            "uses":     0,
         }
         save(keys_db, KEYS_DB)
         e = discord.Embed(title="🔑 Новый ключ создан", color=0x3ba55d)
-        e.add_field(name="Ключ",      value=f"```{key}```",  inline=False)
-        e.add_field(name="До",        value=f"`{expires}`",  inline=True)
-        e.add_field(name="Активаций", value=f"`{max_uses}`", inline=True)
-        e.add_field(name="Создан",    value=f"`{datetime.now().strftime('%d.%m.%Y %H:%M')}`", inline=True)
+        e.add_field(name="Ключ", value=f"```{key}```", inline=False)
+        e.add_field(name="До",   value=f"`{expires}`", inline=True)
         await ch.send(embed=e)
 
-    # !hwid UID снять|сбросить [кол-во]
-    elif text.startswith("!hwid "):
-        parts = text.split()
-        if len(parts) < 3:
-            await ch.send(
-                "Использование:\n"
-                "`!hwid 1 снять` — снять привязку HWID (1 раз)\n"
-                "`!hwid 1 сбросить 3` — дать 3 сброса HWID"
-            ); return
-
-        try:
-            uid = int(parts[1])
-        except ValueError:
-            await ch.send("❌ UID должен быть числом"); return
-
-        action = parts[2].lower()
-        db = load()
-
-        # Найти пользователя по UID
-        hwid_found = None
-        for hwid, u in db.items():
-            if int(u.get("uid", -1)) == uid:
-                hwid_found = hwid
-                break
-
-        if hwid_found is None:
-            await ch.send(f"❌ UID {uid} не найден"); return
-
-        u = db[hwid_found]
-
-        if action == "снять":
-            u["hwid_reset"]      = True
-            u["hwid_reset_uses"] = 1
-            db[hwid_found] = u
-            save(db)
-            e = discord.Embed(title="🔓 HWID снят", color=0x3ba55d)
-            e.add_field(name="UID",  value=f"`{uid}`",               inline=True)
-            e.add_field(name="Имя",  value=f"`{u.get('name','?')}`", inline=True)
-            e.add_field(name="Инфо", value="Может зайти с любого железа **1 раз**", inline=False)
-            await ch.send(embed=e)
-
-        elif action == "сбросить":
-            count = 1
-            if len(parts) >= 4:
-                try:
-                    count = int(parts[3])
-                    if count < 1: raise ValueError
-                except ValueError:
-                    await ch.send("❌ Кол-во сбросов — число >= 1"); return
-            u["hwid_reset"]      = True
-            u["hwid_reset_uses"] = count
-            db[hwid_found] = u
-            save(db)
-            e = discord.Embed(title="🔄 HWID сброшен", color=0x5865f2)
-            e.add_field(name="UID",     value=f"`{uid}`",               inline=True)
-            e.add_field(name="Имя",     value=f"`{u.get('name','?')}`", inline=True)
-            e.add_field(name="Сбросов", value=f"`{count}`",             inline=True)
-            e.add_field(name="Инфо",    value=f"Может сменить железо **{count}** раз(а)", inline=False)
-            await ch.send(embed=e)
-
-        else:
-            await ch.send("❌ Действие: `снять` или `сбросить`")
+    # !keys
+    elif text == "!keys":
         keys_db = load(KEYS_DB)
         if not keys_db: await ch.send("Нет ключей"); return
         lines = []
         for k, v in list(keys_db.items())[:20]:
-            uses     = v.get("uses", 1 if v.get("used") else 0)
-            max_uses = v.get("max_uses", 1)
-            st = "✅" if uses >= max_uses else "🔑"
+            st = "✅" if v.get("used") else "🔑"
             by = f" → `{v['used_by']}`" if v.get("used_by") else ""
-            lines.append(f"{st} `{k}` до `{v['expires']}` [{uses}/{max_uses}]{by}")
+            lines.append(f"{st} `{k}` до `{v['expires']}`{by}")
         e = discord.Embed(title=f"🔑 Ключи ({len(keys_db)})",
                           description="\n".join(lines), color=0x5865f2)
         await ch.send(embed=e)
 
-    # !reg ник
-    elif text.startswith("!reg "):
-        nick     = text[5:].strip().lower()
+    # !reg loader срок
+    elif text.startswith("!reg loader "):
+        parts = text.split()
+        if len(parts) < 3:
+            await ch.send("Использование: `!reg loader 25.05.2026`"); return
+        
+        expires = parts[2]
+        if expires != "∞":
+            try: datetime.strptime(expires, "%d.%m.%Y")
+            except: await ch.send("❌ Формат даты: `!reg loader 25.05.2026`"); return
+        
         accounts = load(ACCOUNTS)
-        if nick in accounts:
-            await ch.send(f"❌ Ник `{nick}` уже зарегистрирован"); return
-        tmp_pass = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
-        accounts[nick] = {
-            "password": tmp_pass, "key": "manual",
-            "expires":  "∞",
-            "created":  datetime.now().strftime("%d.%m.%Y %H:%M"),
-            "banned":   False,
+        login    = "user" + str(len(accounts) + 1)
+        tmp_pass = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
+        uid      = len(accounts) + 1
+        
+        accounts[login] = {
+            "uid": uid,
+            "password": tmp_pass,
+            "key": "loader",
+            "expires": expires,
+            "created": datetime.now().strftime("%d.%m.%Y %H:%M"),
+            "banned": False,
+            "group": "Пользователь"
         }
         save(accounts, ACCOUNTS)
-        e = discord.Embed(title="✅ Пользователь зарегистрирован", color=0x3ba55d)
-        e.add_field(name="Ник",    value=f"`{nick}`",     inline=True)
-        e.add_field(name="Пароль", value=f"`{tmp_pass}`", inline=True)
-        e.set_footer(text="Передай пользователю эти данные")
+        
+        e = discord.Embed(title="✅ Аккаунт лоудера создан", color=0x3ba55d)
+        e.add_field(name="🆔 UID",     value=f"`{uid}`",      inline=True)
+        e.add_field(name="👤 Логин",   value=f"`{login}`",    inline=True)
+        e.add_field(name="🔑 Пароль",  value=f"`{tmp_pass}`", inline=True)
+        e.add_field(name="📅 До",      value=f"`{expires}`",  inline=True)
+        e.add_field(name="📦 Создан",  value=f"`{datetime.now().strftime('%d.%m.%Y %H:%M')}`", inline=True)
+        e.set_footer(text="Передай пользователю логин и пароль для входа в лоудер")
         await ch.send(embed=e)
+
+    # !loader users
+    elif text == "!loader users":
+        accounts = load(ACCOUNTS)
+        if not accounts: await ch.send("Нет пользователей лоудера"); return
+        lines = []
+        for login, acc in list(accounts.items())[:20]:
+            em = "🚫" if acc.get("banned") else "✅"
+            exp = acc.get("expires", "∞")
+            lines.append(f"{em} **UID {acc.get('uid',0)}** — `{login}` | До: `{exp}`")
+        e = discord.Embed(title=f"👥 Пользователи лоудера ({len(accounts)})",
+                          description="\n".join(lines), color=0x5865f2)
+        await ch.send(embed=e)
+
+    # !uid loader N ban/unban
+    elif text.startswith("!uid loader "):
+        parts = text.split()
+        if len(parts) < 4:
+            await ch.send("Использование: `!uid loader 1 ban` или `!uid loader 1 unban`"); return
+        
+        try:
+            uid = int(parts[2])
+            action = parts[3].lower()
+        except ValueError:
+            await ch.send("❌ UID должен быть числом"); return
+        
+        if action not in ["ban", "unban"]:
+            await ch.send("❌ Действие: `ban` или `unban`"); return
+        
+        accounts = load(ACCOUNTS)
+        found = False
+        for login, acc in accounts.items():
+            if acc.get("uid") == uid:
+                acc["banned"] = (action == "ban")
+                accounts[login] = acc
+                save(accounts, ACCOUNTS)
+                found = True
+                
+                status = "🚫 Заблокирован" if action == "ban" else "✅ Разблокирован"
+                e = discord.Embed(title=f"{status}", color=0xed4245 if action == "ban" else 0x3ba55d)
+                e.add_field(name="UID",   value=f"`{uid}`",   inline=True)
+                e.add_field(name="Логин", value=f"`{login}`", inline=True)
+                e.add_field(name="До",    value=f"`{acc.get('expires','∞')}`", inline=True)
+                await ch.send(embed=e)
+                break
+        
+        if not found:
+            await ch.send(f"❌ UID {uid} не найден")
 
 if __name__ == "__main__":
     print(f"[*] Запуск на порту {PORT}")
@@ -578,3 +564,4 @@ if __name__ == "__main__":
     threading.Thread(target=start_tunnel, daemon=True).start()
 
     client.run(BOT_TOKEN)
+
